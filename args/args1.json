@@ -1,6 +1,6 @@
 {
   "img_size": [256,256],
-  "Batch_Size": 2,
+  "Batch_Size": 4,
   "EPOCHS": 3000,
   "T": 1000,
   "base_channels": 128,
