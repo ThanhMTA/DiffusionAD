@@ -1,3 +1,4 @@
+
 from random import seed
 import torch
 import os
@@ -96,10 +97,12 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
     best_image_auroc=0.0
     best_pixel_auroc=0.0
     best_epoch=0
+    patience = 5
+    patience_counter = 0
     image_auroc_list=[]
     pixel_auroc_list=[]
     performance_x_list=[]
-    
+    best_loss = float('inf')
     for epoch in tqdm_epoch:
         unet_model.train()
         seg_model.train()
@@ -137,26 +140,42 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
             train_focal_loss+=5*focal_loss.item()
             train_noise_loss+=noise_loss.item()
             
+        if train_loss < best_loss:
+          print (best_loss,'->',train_loss)
+          best_loss = train_loss
+          
+          print("saving model...")
+          save(unet_model,seg_model, args=args,final='best',epoch=epoch,sub_class=sub_class)
+          performance_x_list.append(int(epoch))
+          best_epoch = epoch
+          patience_counter = 0  # Reset counter khi tìm thấy mô hình tốt hơn
+        else:
+          patience_counter += 1
+        
+        # Kiểm tra xem có vượt quá số lần kiên nhẫn không
+        if patience_counter >= 20:
+            print(f'Early stopping at epoch {epoch} due to no improvement in loss.')
+            break
 
-        if epoch % 10 ==0  and epoch > 0:
-            train_loss_list.append(round(train_loss,3))
-            train_smL1_loss_list.append(round(train_smL1_loss,3))
-            train_focal_loss_list.append(round(train_focal_loss,3))
-            train_noise_loss_list.append(round(train_noise_loss,3))
-            loss_x_list.append(int(epoch))
+        # if epoch % 10 ==0  and epoch > 0:
+        #     train_loss_list.append(round(train_loss,3))
+        #     train_smL1_loss_list.append(round(train_smL1_loss,3))
+        #     train_focal_loss_list.append(round(train_focal_loss,3))
+        #     train_noise_loss_list.append(round(train_noise_loss,3))
+        #     loss_x_list.append(int(epoch))
 
 
-        if (epoch+1) % 50==0 and epoch > 0:
-            temp_image_auroc,temp_pixel_auroc= eval(testing_dataset_loader,args,unet_model,seg_model,data_len,sub_class,device)
-            image_auroc_list.append(temp_image_auroc)
-            pixel_auroc_list.append(temp_pixel_auroc)
-            performance_x_list.append(int(epoch))
-            if(temp_image_auroc+temp_pixel_auroc>=best_image_auroc+best_pixel_auroc):
-                if temp_image_auroc>=best_image_auroc:
-                    save(unet_model,seg_model, args=args,final='best',epoch=epoch,sub_class=sub_class)
-                    best_image_auroc = temp_image_auroc
-                    best_pixel_auroc = temp_pixel_auroc
-                    best_epoch = epoch
+        # if (epoch+1) %10==0 and epoch > 0:
+        #   temp_image_auroc,temp_pixel_auroc= eval(testing_dataset_loader,args,unet_model,seg_model,data_len,sub_class,device)
+        #   image_auroc_list.append(temp_image_auroc)
+        #   pixel_auroc_list.append(temp_pixel_auroc)
+        #   performance_x_list.append(int(epoch))
+        #   if(temp_image_auroc+temp_pixel_auroc>=best_image_auroc+best_pixel_auroc):
+        #       if temp_image_auroc>=best_image_auroc:
+        #           save(unet_model,seg_model, args=args,final='best',epoch=epoch,sub_class=sub_class)
+        #           best_image_auroc = temp_image_auroc
+        #           best_pixel_auroc = temp_pixel_auroc
+        #           best_epoch = epoch
                 
             
     save(unet_model,seg_model, args=args,final='last',epoch=args['EPOCHS'],sub_class=sub_class)
@@ -259,17 +278,16 @@ def main():
     args = defaultdict_from_json(args)
 
 
-    mvtec_classes = ['carpet', 'grid', 'leather', 'tile', 'wood', 'bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut', 'pill', 'screw',
-            'toothbrush', 'transistor', 'zipper']
+    mvtec_classes = ['carpet']
     
-    visa_classes = ['candle', 'capsules', 'cashew', 'chewinggum', 'fryum', 'macaroni1', 'macaroni2', 'pcb1', 'pcb2',
-             'pcb3', 'pcb4', 'pipe_fryum']
+    visa_classes = ['capsules']
     
     mpdd_classes = ['bracket_black', 'bracket_brown', 'bracket_white', 'connector', 'metal_plate', 'tubes'] 
     dagm_class = ['Class1', 'Class2', 'Class3', 'Class4', 'Class5','Class6', 'Class7', 'Class8', 'Class9', 'Class10']
 
 
-    current_classes = mvtec_classes
+    current_classes =visa_classes
+
 
     class_type = ''
     for sub_class in current_classes:    
@@ -316,7 +334,7 @@ def main():
         print(file, args)     
 
         data_len = len(testing_dataset) 
-        training_dataset_loader = DataLoader(training_dataset, batch_size=args['Batch_Size'],shuffle=True,num_workers=8,pin_memory=True,drop_last=True)
+        training_dataset_loader = DataLoader(training_dataset, batch_size=args['Batch_Size'],shuffle=True,num_workers=4,pin_memory=True,drop_last=True)
         test_loader = DataLoader(testing_dataset, batch_size=1,shuffle=False, num_workers=4)
 
         # make arg specific directories
