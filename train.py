@@ -177,6 +177,8 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
                 "dropout"], n_heads=args["num_heads"], n_head_channels=args["num_head_channels"],
             in_channels=in_channels
             ).to(device)
+    if torch.cuda.device_count() > 1:
+        unet_model = nn.DataParallel(unet_model)
 
 
     betas = get_beta_schedule(args['T'], args['beta_schedule'])
@@ -187,6 +189,8 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
             )
 
     seg_model=SegmentationSubNetwork(in_channels=6, out_channels=1).to(device)
+    if torch.cuda.device_count() > 1:
+        seg_model = nn.DataParallel(seg_model)
 
 
     optimizer_ddpm = optim.Adam( unet_model.parameters(), lr=args['diffusion_lr'],weight_decay=args['weight_decay'])
