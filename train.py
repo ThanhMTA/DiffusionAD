@@ -1,5 +1,5 @@
-
 from random import seed
+from re import A
 import torch
 import os
 import json
@@ -20,7 +20,121 @@ from skimage.measure import label, regionprops
 from sklearn.metrics import roc_auc_score,auc,average_precision_score
 import pandas as pd
 from collections import defaultdict
+import matplotlib.pyplot as plt
+import numpy as np
 
+
+import torchvision
+import torchvision.transforms as transforms
+# tensorboard 
+from torch.utils.tensorboard import SummaryWriter
+# default `log_dir` is "runs" - we'll be more specific here
+
+# early stopper 
+
+class EarlyStop():
+    """Used to early stop the training if validation loss doesn't improve after a given patience."""
+    def __init__(self, patience=20, verbose=True, delta=0, save_name="checkpoint.pt"):
+        """
+        Args:
+            patience (int): How long to wait after last time validation loss improved.
+                            Default: 20
+            verbose (bool): If True, prints a message for each validation loss improvement.
+                            Default: False
+            delta (float): Minimum change in the monitored quantity to qualify as an improvement.
+                            Default: 0
+            save_name (string): The filename with which the model and the optimizer is saved when improved.
+                            Default: "checkpoint.pt"
+        """
+        self.patience = patience
+        self.verbose = verbose
+        self.save_name = save_name
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = np.Inf
+        self.delta = delta
+
+    def __call__(self, val_loss,unet_model,seg_model, args,epoch,sub_class):
+
+        score = -val_loss
+
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss,unet_model,seg_model, args,epoch,sub_class)
+        elif score < self.best_score - self.delta:
+            self.counter += 1
+            print((f'EarlyStopping counter: {self.counter} out of {self.patience}'))
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss,unet_model,seg_model, args,epoch,sub_class)
+            self.counter = 0
+
+        return self.early_stop
+    def save_checkpoint(self,val_loss,unet_model,seg_model, args,epoch,sub_class):
+    
+      if self.verbose:
+        print((f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...'))
+      torch.save(
+              {
+                  'n_epoch':              epoch,
+                  'unet_model_state_dict': unet_model.state_dict(),
+                  'seg_model_state_dict':  seg_model.state_dict(),
+                  "args":                 args
+                  }, f'{args["output_path"]}/model/diff-params-ARGS={args["arg_num"]}/{sub_class}/params-best.pt'
+              )
+      self.val_loss_min = val_loss
+# auroc 
+class getAuroc:
+    def __init__(self, patience=20, verbose=True, delta=0, save_name="checkpoint.pt"):
+        self.patience = patience
+        self.verbose = verbose
+        self.save_name = save_name
+        self.counter = 0
+        self.best_auroc_image= None
+        self.best_auroc= None
+        self.early_stop = False
+        self.auroc_max = 0 
+        self.delta = delta
+
+    def __call__(self, auroc_image, auroc_pixel,unet_model,seg_model, args,epoch,sub_class):
+        if self.best_auroc is None and self.best_auroc_image is None:
+            self.best_auroc = auroc_image + auroc_pixel
+            self.best_auroc_image = auroc_image 
+            self.save_checkpoint(auroc_image, auroc_pixel,unet_model,seg_model, args,epoch,sub_class)
+        elif auroc_image + auroc_pixel < self.best_auroc:
+            self.counter += 1
+            print((f'EarlyStopping counter: {self.counter} out of {self.patience}'))
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_auroc = auroc_image + auroc_pixel
+            if auroc_image  < self.best_auroc_image:
+              self.counter += 1
+              print((f'EarlyStopping counter: {self.counter} out of {self.patience}'))
+              if self.counter >= self.patience:
+                  self.early_stop = True
+            else:
+              self.best_auroc_image = auroc_image
+              self.save_checkpoint(auroc_image, auroc_pixel,unet_model,seg_model, args,epoch,sub_class)
+              self.counter = 0
+
+        return self.early_stop
+    def save_checkpoint(self,auroc_image, auroc_pixel,unet_model,seg_model, args,epoch,sub_class):
+    
+      if self.verbose:
+        print((f'Validation loss decreased ({self.auroc_max:.6f} --> {auroc_image+auroc_pixel:.6f}).  Saving model ...'))
+      torch.save(
+              {
+                  'n_epoch':              epoch,
+                  'unet_model_state_dict': unet_model.state_dict(),
+                  'seg_model_state_dict':  seg_model.state_dict(),
+                  "args":                 args
+                  }, f'{args["output_path"]}/model/diff-params-ARGS={args["arg_num"]}/{sub_class}/params-best.pt'
+              )
+      self.auroc_max = auroc_image+auroc_pixel
 def weights_init(m):
         classname = m.__class__.__name__
         if classname.find('Conv') != -1:
@@ -57,7 +171,7 @@ class BinaryFocalLoss(nn.Module):
             return F_loss
 
 def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_class,class_type,device ):
-   
+    writer = SummaryWriter(f'{args["output_path"]}/log/ARGS={args["arg_num"]}/{sub_class}/')
     in_channels = args["channels"]
     unet_model = UNetModel(args['img_size'][0], args['base_channels'], channel_mults=args['channel_mults'], dropout=args[
                 "dropout"], n_heads=args["num_heads"], n_head_channels=args["num_head_channels"],
@@ -97,12 +211,10 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
     best_image_auroc=0.0
     best_pixel_auroc=0.0
     best_epoch=0
-    patience = 5
-    patience_counter = 0
     image_auroc_list=[]
     pixel_auroc_list=[]
     performance_x_list=[]
-    best_loss = float('inf')
+    get_Auroc = getAuroc(patience=20)
     for epoch in tqdm_epoch:
         unet_model.train()
         seg_model.train()
@@ -116,7 +228,6 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
             aug_image=sample['augmented_image'].to(device)
             anomaly_mask = sample["anomaly_mask"].to(device)
             anomaly_label = sample["has_anomaly"].to(device).squeeze()
-
             noise_loss, pred_x0,normal_t,x_normal_t,x_noiser_t = ddpm_sample.norm_guided_one_step_denoising(unet_model, aug_image, anomaly_label,args)
             pred_mask = seg_model(torch.cat((aug_image, pred_x0), dim=1)) 
 
@@ -133,52 +244,50 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
             optimizer_seg.step()
             scheduler_seg.step()
 
-            train_loss += loss.item()
-            tbar.set_description('Epoch:%d, Train loss: %.3f' % (epoch, train_loss))
+            train_loss += loss.item() # hàm mất mát trong quá trình train model 
+            tbar.set_description('Epoch:%d, Train loss: %.3f ' % (epoch, train_loss ))
 
             train_smL1_loss += smL1_loss.item()
             train_focal_loss+=5*focal_loss.item()
-            train_noise_loss+=noise_loss.item()
-            
-        if train_loss < best_loss:
-          print (best_loss,'->',train_loss)
-          best_loss = train_loss
-          
-          print("saving model...")
-          save(unet_model,seg_model, args=args,final='best',epoch=epoch,sub_class=sub_class)
-          performance_x_list.append(int(epoch))
-          best_epoch = epoch
-          patience_counter = 0  # Reset counter khi tìm thấy mô hình tốt hơn
-        else:
-          patience_counter += 1
-        
-        # Kiểm tra xem có vượt quá số lần kiên nhẫn không
-        if patience_counter >= 20:
-            print(f'Early stopping at epoch {epoch} due to no improvement in loss.')
-            break
-
+            train_noise_loss+=noise_loss.item()            
+            writer.add_scalar('train_loss',train_loss, epoch)
+            # # writer.add_figure('predictions vs. actuals',
+            #         plot_classes_preds(net, inputs, labels),
+            #         global_step=epoch * len(tbar) + i)
         # if epoch % 10 ==0  and epoch > 0:
-        #     train_loss_list.append(round(train_loss,3))
-        #     train_smL1_loss_list.append(round(train_smL1_loss,3))
-        #     train_focal_loss_list.append(round(train_focal_loss,3))
-        #     train_noise_loss_list.append(round(train_noise_loss,3))
-        #     loss_x_list.append(int(epoch))
+        train_loss_list.append(round(train_loss,3))
+        train_smL1_loss_list.append(round(train_smL1_loss,3))
+        train_focal_loss_list.append(round(train_focal_loss,3))
+        train_noise_loss_list.append(round(train_noise_loss,3))
+        loss_x_list.append(int(epoch))
 
 
-        # if (epoch+1) %10==0 and epoch > 0:
-        #   temp_image_auroc,temp_pixel_auroc= eval(testing_dataset_loader,args,unet_model,seg_model,data_len,sub_class,device)
-        #   image_auroc_list.append(temp_image_auroc)
-        #   pixel_auroc_list.append(temp_pixel_auroc)
-        #   performance_x_list.append(int(epoch))
-        #   if(temp_image_auroc+temp_pixel_auroc>=best_image_auroc+best_pixel_auroc):
-        #       if temp_image_auroc>=best_image_auroc:
-        #           save(unet_model,seg_model, args=args,final='best',epoch=epoch,sub_class=sub_class)
-        #           best_image_auroc = temp_image_auroc
-        #           best_pixel_auroc = temp_pixel_auroc
-        #           best_epoch = epoch
-                
+        # if (epoch+1) % 50==0 and epoch > 0:
+        val_loss,temp_image_auroc,temp_pixel_auroc= eval(testing_dataset_loader,args,unet_model,seg_model,data_len,sub_class,device)
+        image_auroc_list.append(temp_image_auroc)
+        pixel_auroc_list.append(temp_pixel_auroc)
+        performance_x_list.append(int(epoch))
+        # print('val_loss:',val_loss)
+        # print('val_loss:',temp_image_auroc)
+        writer.add_scalars('val_loss',{"val_loss":val_loss*10,"Image_auroc":temp_image_auroc,"pixel_auroc":temp_pixel_auroc },epoch )
+        # writer.add_scalar('val_loss',temp_image_auroc,epoch )
+        # writer.add_scalar('Validation/val_loss', val_loss / 1000, epoch)
+        # writer.add_scalar('Validation/temp_image_auroc', temp_image_auroc, epoch)
+        if (get_Auroc(temp_image_auroc,temp_pixel_auroc,unet_model,seg_model, args,epoch,sub_class)):
+            break
+        #  ghi vao tensorboard 
+
+        # if(temp_image_auroc+temp_pixel_auroc>=best_image_auroc+best_pixel_auroc):
+        #   # if temp_image_auroc>=best_image_auroc:
+        #         save(unet_model,seg_model, args=args,final='best',epoch=epoch,sub_class=sub_class)
+        #         best_image_auroc = temp_image_auroc
+        #         best_pixel_auroc = temp_pixel_auroc
+        #         best_epoch = epoch
+        
+        #   print("Early stopping at epoch:", epoch)
+        #     break        
             
-    save(unet_model,seg_model, args=args,final='last',epoch=args['EPOCHS'],sub_class=sub_class)
+    # save(unet_model,seg_model, args=args,final='last',epoch=args['EPOCHS'],sub_class=sub_class)
 
 
 
@@ -191,6 +300,9 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
 def eval(testing_dataset_loader,args,unet_model,seg_model,data_len,sub_class,device):
     unet_model.eval()
     seg_model.eval()
+    loss_focal = BinaryFocalLoss().to(device)
+    loss_smL1= nn.SmoothL1Loss().to(device)
+    val_loss = 0.0
     os.makedirs(f'{args["output_path"]}/metrics/ARGS={args["arg_num"]}/{sub_class}/', exist_ok=True)
     in_channels = args["channels"]
     betas = get_beta_schedule(args['T'], args['beta_schedule'])
@@ -200,7 +312,7 @@ def eval(testing_dataset_loader,args,unet_model,seg_model,data_len,sub_class,dev
             loss_type=args['loss-type'], noise=args["noise_fn"], img_channels=in_channels
             )
     
-    print("data_len",data_len)
+    # print("data_len",data_len)
     total_image_pred = np.array([])
     total_image_gt =np.array([])
     total_pixel_gt=np.array([])
@@ -213,11 +325,21 @@ def eval(testing_dataset_loader,args,unet_model,seg_model,data_len,sub_class,dev
 
         normal_t_tensor = torch.tensor([args["eval_normal_t"]], device=image.device).repeat(image.shape[0])
         noiser_t_tensor = torch.tensor([args["eval_noisier_t"]], device=image.device).repeat(image.shape[0])
-        loss,pred_x_0_condition,pred_x_0_normal,pred_x_0_noisier,x_normal_t,x_noiser_t,pred_x_t_noisier = ddpm_sample.norm_guided_one_step_denoising_eval(unet_model, image, normal_t_tensor,noiser_t_tensor,args)
+        noise_loss,pred_x_0_condition,pred_x_0_normal,pred_x_0_noisier,x_normal_t,x_noiser_t,pred_x_t_noisier = ddpm_sample.norm_guided_one_step_denoising_eval(unet_model, image, normal_t_tensor,noiser_t_tensor,args)
         pred_mask = seg_model(torch.cat((image, pred_x_0_condition), dim=1)) 
 
         out_mask = pred_mask
 
+       
+        # anomaly_mask = sample["anomaly_mask"].to(device)
+        # anomaly_label = sample["has_anomaly"].to(device).squeeze()
+        # noise_loss, pred_x0,normal_t,x_normal_t,x_noiser_t = ddpm_sample.norm_guided_one_step_denoising(unet_model, image , anomaly_label,args)
+    
+        #loss
+        focal_loss = loss_focal(out_mask,gt_mask)
+        smL1_loss = loss_smL1(out_mask, gt_mask)
+        loss = noise_loss + 5*focal_loss + smL1_loss
+        val_loss=loss.item()
         topk_out_mask = torch.flatten(out_mask[0], start_dim=1)
         topk_out_mask = torch.topk(topk_out_mask, 50, dim=1, largest=True)[0]
         image_score = torch.mean(topk_out_mask)
@@ -233,37 +355,37 @@ def eval(testing_dataset_loader,args,unet_model,seg_model,data_len,sub_class,dev
         total_pixel_pred=np.append(total_pixel_pred,flatten_pred_mask)
         
         
-    print(sub_class)
-    auroc_image = round(roc_auc_score(total_image_gt,total_image_pred),3)*100
+    # print(sub_class)
+    auroc_image = round(roc_auc_score(total_image_gt,total_image_pred),3)
     print("Image AUC-ROC: " ,auroc_image)
     
-    auroc_pixel =  round(roc_auc_score(total_pixel_gt, total_pixel_pred),3)*100
+    auroc_pixel =  round(roc_auc_score(total_pixel_gt, total_pixel_pred),3)
     print("Pixel AUC-ROC:" ,auroc_pixel)
    
-    return auroc_image,auroc_pixel
+    return val_loss,auroc_image,auroc_pixel
 
 
-def save(unet_model,seg_model, args,final,epoch,sub_class):
+# def save(unet_model,seg_model, args,final,epoch,sub_class):
     
-    if final=='last':
-        torch.save(
-            {
-                'n_epoch':              epoch,
-                'unet_model_state_dict': unet_model.state_dict(),
-                'seg_model_state_dict':  seg_model.state_dict(),
-                "args":                 args
-                }, f'{args["output_path"]}/model/diff-params-ARGS={args["arg_num"]}/{sub_class}/params-{final}.pt'
-            )
+#     if final=='last':
+#         torch.save(
+#             {
+#                 'n_epoch':              epoch,
+#                 'unet_model_state_dict': unet_model.state_dict(),
+#                 'seg_model_state_dict':  seg_model.state_dict(),
+#                 "args":                 args
+#                 }, f'{args["output_path"]}/model/diff-params-ARGS={args["arg_num"]}/{sub_class}/params-{final}.pt'
+#             )
     
-    else:
-        torch.save(
-                {
-                    'n_epoch':              epoch,
-                    'unet_model_state_dict': unet_model.state_dict(),
-                    'seg_model_state_dict':  seg_model.state_dict(),
-                    "args":                 args
-                    }, f'{args["output_path"]}/model/diff-params-ARGS={args["arg_num"]}/{sub_class}/params-{final}.pt'
-                )
+#     else:
+#         torch.save(
+#                 {
+#                     'n_epoch':              epoch,
+#                     'unet_model_state_dict': unet_model.state_dict(),
+#                     'seg_model_state_dict':  seg_model.state_dict(),
+#                     "args":                 args
+#                     }, f'{args["output_path"]}/model/diff-params-ARGS={args["arg_num"]}/{sub_class}/params-{final}.pt'
+#                 )
     
     
 
@@ -278,7 +400,7 @@ def main():
     args = defaultdict_from_json(args)
 
 
-    mvtec_classes = ['carpet']
+    mvtec_classes = ['bottle']
     
     visa_classes = ['capsules']
     
@@ -286,8 +408,7 @@ def main():
     dagm_class = ['Class1', 'Class2', 'Class3', 'Class4', 'Class5','Class6', 'Class7', 'Class8', 'Class9', 'Class10']
 
 
-    current_classes =visa_classes
-
+    current_classes = mvtec_classes
 
     class_type = ''
     for sub_class in current_classes:    
@@ -334,7 +455,8 @@ def main():
         print(file, args)     
 
         data_len = len(testing_dataset) 
-        training_dataset_loader = DataLoader(training_dataset, batch_size=args['Batch_Size'],shuffle=True,num_workers=4,pin_memory=True,drop_last=True)
+        training_dataset_loader = DataLoader(training_dataset, batch_size=args['Batch_Size'],shuffle=True,num_workers=8,pin_memory=True,drop_last=True)
+        # training_dataset_loader = DataLoader(training_dataset_loader, batch_size=args['Batch_Size'],shuffle=True,num_workers=8,pin_memory=True,drop_last=True)
         test_loader = DataLoader(testing_dataset, batch_size=1,shuffle=False, num_workers=4)
 
         # make arg specific directories
