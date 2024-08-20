@@ -383,7 +383,8 @@ def testing(testing_dataset_loader, args,unet_model,seg_model,data_len,sub_class
 def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    mvtec_classes = ['bottle','carpet','capsule']
+    mvtec_classes = ['bottle']
+
     mpdd_classes = ['bracket_black', 'bracket_brown', 'bracket_white', 'connector', 'metal_plate', 'tubes'] 
     visa_classes = [ 'capsules']
 
