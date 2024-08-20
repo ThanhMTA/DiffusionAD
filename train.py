@@ -11,7 +11,7 @@ from models.Recon_subnetwork import UNetModel, update_ema_params
 from models.Seg_subnetwork import SegmentationSubNetwork
 from tqdm import tqdm
 import torch.nn as nn
-from data.dataset_beta_thresh import MVTecTrainDataset,MVTecValDataset,VisATrainDataset,VisAValDataset,DAGMTrainDataset,DAGMTestDataset,MPDDTestDataset,MPDDTrainDataset
+from data.dataset_beta_thresh import MVTecTrainDataset,MVTecTestDataset,VisATrainDataset,VisAValDataset,DAGMTrainDataset,DAGMTestDataset,MPDDTestDataset,MPDDTrainDataset
 from math import exp
 import torch.nn.functional as F
 from models.DDPM import GaussianDiffusionModel, get_beta_schedule
