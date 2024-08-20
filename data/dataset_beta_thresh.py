@@ -132,8 +132,8 @@ class MVTecTrainDataset(Dataset):
         self.classname=classname
         self.root_dir = os.path.join(data_path,'train','good')
         self.resize_shape = [img_size[0], img_size[1]]
-        self.anomaly_source_path = "/content/drive/MyDrive/Anomaly_Detection/data/MvTec-AD/bottle/DISthresh/good"
-        self.image_paths = sorted(glob.glob(self.root_dir+"/*.png"))
+        self.anomaly_source_path = args["anomaly_source_path"]
+        self.image_paths = sorted(glob.glob(self.root_dir+"/good/*.png"))
         self.anomaly_source_paths = sorted(glob.glob(self.anomaly_source_path+"/*.png"))
 
         self.augmenters = [iaa.GammaContrast((0.5, 2.0), per_channel=True),
