@@ -26,6 +26,37 @@ import os
 from torch.utils.data import DataLoader
 from skimage.measure import label, regionprops
 import sys
+#  độ đo Dice 
+import torch
+
+def dice_coeff(pred, target):
+    smooth = 1e-6 
+    # num = pred.shape[0]
+    # chuyển tensor sang kiểu sổ thực 
+    # m1 = pred.view(num, -1).float()  # Flatten
+    # m2 = target.view(num, -1).float()  # Flatten
+    m1 = pred # Flatten
+    m2 = target  # Flatten
+    intersection = (m1 * m2).sum()
+
+    return (2. * intersection + smooth) / (m1.sum() + m2.sum() + smooth)
+def get_IoU(pred, target):
+    smooth = 1e-6 
+    # num = pred.shape[0]
+    # chuyển tensor sang kiểu sổ thực 
+    # m1 = pred.view(num, -1).float()  # Flatten
+    # m2 = target.view(num, -1).float()  # Flatten
+    m1 = pred # Flatten
+    m2 = target  # Flatten
+    # Taken from: https://www.kaggle.com/iezepov/fast-iou-scoring-metric-in-pytorch-and-numpy
+    intersection = (m1 * m2).sum()  # Will be zero if Truth=0 or Prediction=0
+    union = m1.sum() + m2.sum() - intersection# Will be zero if both are 0
+
+    iou = (intersection + smooth) / (union  + smooth)  # We smooth our devision to avoid 0/0
+
+    # thresholded = torch.clamp(20 * (iou - 0.5), 0, 10).ceil() / 10  # This is equal to comparing with thresolds
+    # return thresholded.mean()  # Or thresholded.mean() if you are interested in average across the batch
+    return iou
 
 def pixel_pro(mask,pred):
     mask=np.asarray(mask, dtype=np.bool_)
@@ -324,8 +355,10 @@ def testing(testing_dataset_loader, args,unet_model,seg_model,data_len,sub_class
         f.savefig(savename)
         plt.close()
 
-
-    
+    dice_score= round(dice_coeff(total_image_gt,total_image_pred),3)*100
+    print("Dice_score: " ,dice_score)
+    iou_score= round(get_IoU(total_image_gt,total_image_pred),3)*100
+    print("IOU_score: " ,iou_score)
     auroc_image = round(roc_auc_score(total_image_gt,total_image_pred),3)*100
     print("Image AUC-ROC: " ,auroc_image)
     
@@ -350,11 +383,9 @@ def testing(testing_dataset_loader, args,unet_model,seg_model,data_len,sub_class
 def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    mvtec_classes = ['carpet', 'grid', 'leather', 'tile', 'wood', 'bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut', 'pill', 'screw',
-     'toothbrush', 'transistor', 'zipper']
+    mvtec_classes = ['bottle']
     mpdd_classes = ['bracket_black', 'bracket_brown', 'bracket_white', 'connector', 'metal_plate', 'tubes'] 
-    visa_classes = ['candle', 'capsules', 'cashew', 'chewinggum', 'fryum', 'macaroni1', 'macaroni2', 'pcb1', 'pcb2',
-             'pcb3', 'pcb4', 'pipe_fryum']
+    visa_classes = [ 'capsules']
 
     dagm_class = ['Class1', 'Class2', 'Class3', 'Class4', 'Class5',
                  'Class6', 'Class7', 'Class8', 'Class9', 'Class10']
@@ -380,10 +411,14 @@ def main():
 
         unet_model.load_state_dict(output["unet_model_state_dict"])
         unet_model.to(device)
+        if torch.cuda.device_count() > 1:
+          unet_model = nn.DataParallel(unet_model)
         unet_model.eval()
 
         seg_model.load_state_dict(output["seg_model_state_dict"])
         seg_model.to(device)
+        if torch.cuda.device_count() > 1:
+          seg_model = nn.DataParallel(seg_model)
         seg_model.eval()
 
         print("EPOCH:",output['n_epoch'])
