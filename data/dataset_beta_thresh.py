@@ -463,9 +463,10 @@ class VisATrainDataset(Dataset):
         self.classname=classname
         self.root_dir = os.path.join(data_path,'train','good')
         self.resize_shape = [img_size[0], img_size[1]]
-        self.anomaly_source_path = "/content/drive/MyDrive/Anomaly_Detection/data/VisA/capsules/DISthresh/good"
+        self.anomaly_source_path = args["anomaly_source_path"]
+        # self.anomaly_source_paths = sorted(glob.glob(self.anomaly_source_path+"/good/*.png")
         self.image_paths = sorted(glob.glob(self.root_dir+"/*.JPG"))
-        self.anomaly_source_paths = sorted(glob.glob(self.anomaly_source_path+"/*.JPG"))
+        self.anomaly_source_paths = sorted(glob.glob(self.anomaly_source_path+"/good/*.JPG"))
         self.augmenters = [iaa.GammaContrast((0.5, 2.0), per_channel=True),
                            iaa.MultiplyAndAddToBrightness(
                                mul=(0.8, 1.2), add=(-30, 30)),
