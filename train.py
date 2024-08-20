@@ -440,7 +440,7 @@ def main():
             training_dataset = MVTecTrainDataset(
                 subclass_path,sub_class,img_size=args["img_size"],args=args
                 )
-            testing_dataset = MVTecValDataset(
+            testing_dataset = MVTecTestDataset(
                 subclass_path,sub_class,img_size=args["img_size"],
                 )
             class_type='MVTec'
