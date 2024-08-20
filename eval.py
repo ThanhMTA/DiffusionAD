@@ -409,13 +409,13 @@ def main():
 
         seg_model=SegmentationSubNetwork(in_channels=6, out_channels=1).to(device)
 
-        unet_model.load_state_dict(output["unet_model_state_dict"])
+        unet_model.load_state_dict(output["unet_model_state_dict"],strict=False)
         unet_model.to(device)
         if torch.cuda.device_count() > 1:
           unet_model = nn.DataParallel(unet_model)
         unet_model.eval()
 
-        seg_model.load_state_dict(output["seg_model_state_dict"])
+        seg_model.load_state_dict(output["seg_model_state_dict"],strict=False)
         seg_model.to(device)
         if torch.cuda.device_count() > 1:
           seg_model = nn.DataParallel(seg_model)
