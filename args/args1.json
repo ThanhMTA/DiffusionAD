@@ -22,7 +22,7 @@
   "visa_root_path":"/kaggle/input/up-data",
   "dagm_root_path":"datasets/dagm",
   "mpdd_root_path":"datasets/mpdd",
-  "anomaly_source_path":"/kaggle/input/mvtec-upload-dataset/bottle/DISthresh",
+  "anomaly_source_path":"/kaggle/input/up-data/capsules/DISthresh",
   "noisier_t_range":600,
   "less_t_range":300,
   "condition_w":1,
