@@ -110,7 +110,7 @@ class getAuroc:
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
-            self.best_auroc = auroc_image + auroc_pixel
+            
             if auroc_image  < self.best_auroc_image:
               self.counter += 1
               print((f'EarlyStopping counter: {self.counter} out of {self.patience}'))
@@ -118,6 +118,7 @@ class getAuroc:
                   self.early_stop = True
             else:
               self.best_auroc_image = auroc_image
+              self.best_auroc = auroc_image + auroc_pixel
               self.save_checkpoint(auroc_image, auroc_pixel,unet_model,seg_model, args,epoch,sub_class)
               self.counter = 0
 
