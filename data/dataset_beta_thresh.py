@@ -10,9 +10,65 @@ from torchvision import transforms
 import random
 from data.perlin import rand_perlin_2d_np
 
-texture_list = ['carpet', 'zipper', 'leather', 'tile', 'wood','grid',
+texture_list = ['capsules','carpet', 'zipper', 'leather', 'tile', 'wood','grid',
                 'Class1', 'Class2', 'Class3', 'Class4', 'Class5',
                  'Class6', 'Class7', 'Class8', 'Class9', 'Class10']
+class MVTecValDataset(Dataset):
+
+    def __init__(self, data_path,classname,img_size):
+        self.root_dir = os.path.join(data_path,'val')
+        self.images = sorted(glob.glob(self.root_dir+"/*/*.png"))
+        self.resize_shape = [img_size[0], img_size[1]]
+
+    def __len__(self):
+        return len(self.images)
+
+    def transform_image(self, image_path, mask_path):
+        image = cv2.cvtColor(cv2.imread(image_path),cv2.COLOR_BGR2RGB)
+        if mask_path is not None:
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        else:
+            mask = np.zeros((image.shape[0], image.shape[1]))
+        if self.resize_shape != None:
+            image = cv2.resize(image, dsize=(
+                self.resize_shape[1], self.resize_shape[0]))
+            mask = cv2.resize(mask, dsize=(
+                self.resize_shape[1], self.resize_shape[0]))
+
+        image = image / 255.0
+        mask = mask / 255.0
+
+        image = np.array(image).reshape(
+            (image.shape[0], image.shape[1], 3)).astype(np.float32)
+        mask = np.array(mask).reshape(
+            (mask.shape[0], mask.shape[1], 1)).astype(np.float32)
+
+        image = np.transpose(image, (2, 0, 1))
+        mask = np.transpose(mask, (2, 0, 1))
+        return image, mask
+    
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        img_path = self.images[idx]
+        dir_path, file_name = os.path.split(img_path)
+        base_dir = os.path.basename(dir_path)
+        if base_dir == 'good':
+            image, mask = self.transform_image(img_path, None)
+            has_anomaly = np.array([0], dtype=np.float32)
+        else:
+            mask_path = os.path.join(dir_path, '../../ground_truth/')
+            mask_path = os.path.join(mask_path, base_dir)
+            mask_file_name = file_name.split(".")[0]+"_mask.png"
+            mask_path = os.path.join(mask_path, mask_file_name)
+            image, mask = self.transform_image(img_path, mask_path)
+            has_anomaly = np.array([1], dtype=np.float32)
+
+        sample = {'image': image, 'has_anomaly': has_anomaly,
+                  'mask': mask, 'idx': idx,'type':img_path[len(self.root_dir):-8],'file_name':base_dir+'_'+file_name}
+
+        return sample
 class MVTecTestDataset(Dataset):
 
     def __init__(self, data_path,classname,img_size):
@@ -69,7 +125,6 @@ class MVTecTestDataset(Dataset):
                   'mask': mask, 'idx': idx,'type':img_path[len(self.root_dir):-8],'file_name':base_dir+'_'+file_name}
 
         return sample
-
 class MVTecTrainDataset(Dataset):
 
     def __init__(self, data_path,classname,img_size,args):
@@ -77,10 +132,9 @@ class MVTecTrainDataset(Dataset):
         self.classname=classname
         self.root_dir = os.path.join(data_path,'train','good')
         self.resize_shape = [img_size[0], img_size[1]]
-        self.anomaly_source_path = args["anomaly_source_path"]
-
+        self.anomaly_source_path = "/content/drive/MyDrive/Anomaly_Detection/data/MvTec-AD/bottle/DISthresh/good"
         self.image_paths = sorted(glob.glob(self.root_dir+"/*.png"))
-        self.anomaly_source_paths = sorted(glob.glob(self.anomaly_source_path+"/good/*/*.JPG"))
+        self.anomaly_source_paths = sorted(glob.glob(self.anomaly_source_path+"/*.png"))
 
         self.augmenters = [iaa.GammaContrast((0.5, 2.0), per_channel=True),
                            iaa.MultiplyAndAddToBrightness(
@@ -270,7 +324,11 @@ class MVTecTrainDataset(Dataset):
         image = np.array(image).astype(np.float32)/255.0
 
 
-        
+        if len(self.anomaly_source_paths) == 0:
+          raise ValueError("Không có tệp nào trong anomaly_source_paths.")
+          print(anomaly_source_paths)
+
+
         anomaly_source_idx = torch.randint(0, len(self.anomaly_source_paths), (1,)).item()
         anomaly_path = self.anomaly_source_paths[anomaly_source_idx]
         augmented_image, anomaly_mask, has_anomaly  = self.perlin_synthetic(image,thresh,anomaly_path,cv2_image,thresh_path)
@@ -285,12 +343,67 @@ class MVTecTrainDataset(Dataset):
 
         return sample
 
-
-
 class VisATestDataset(Dataset):
 
     def __init__(self, data_path,classname,img_size):
         self.root_dir = os.path.join(data_path,'test')
+        self.images = sorted(glob.glob(self.root_dir+"/*/*.JPG"))
+        self.resize_shape = [img_size[0], img_size[1]]
+
+    def __len__(self):
+        return len(self.images)
+
+    def transform_image(self, image_path, mask_path):
+        image = cv2.cvtColor(cv2.imread(image_path),cv2.COLOR_BGR2RGB)
+        if mask_path is not None:
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        else:
+            mask = np.zeros((image.shape[0], image.shape[1]))
+        if self.resize_shape != None:
+            image = cv2.resize(image, dsize=(
+                self.resize_shape[1], self.resize_shape[0]))
+            mask = cv2.resize(mask, dsize=(
+                self.resize_shape[1], self.resize_shape[0]))
+
+        image = image / 255.0
+        mask = mask / 255.0
+
+        image = np.array(image).reshape(
+            (image.shape[0], image.shape[1], 3)).astype(np.float32)
+        mask = np.array(mask).reshape(
+            (mask.shape[0], mask.shape[1], 1)).astype(np.float32)
+
+        image = np.transpose(image, (2, 0, 1))
+        mask = np.transpose(mask, (2, 0, 1))
+        return image, mask
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        img_path = self.images[idx]
+        dir_path, file_name = os.path.split(img_path)
+        base_dir = os.path.basename(dir_path)
+        if base_dir == 'good':
+            image, mask = self.transform_image(img_path, None)
+            has_anomaly = np.array([0], dtype=np.float32)
+        else:
+            mask_path = os.path.join(dir_path, '../../ground_truth/')
+            mask_path = os.path.join(mask_path, base_dir)
+            mask_file_name = file_name.split(".")[0]+".png"
+            mask_path = os.path.join(mask_path, mask_file_name)
+            image, mask = self.transform_image(img_path, mask_path)
+            has_anomaly = np.array([1], dtype=np.float32)
+
+        sample = {'image': image, 'has_anomaly': has_anomaly,
+                  'mask': mask, 'idx': idx,'type':img_path[len(self.root_dir):-8],'file_name':base_dir+'_'+file_name}
+
+        return sample
+
+class VisAValDataset(Dataset):
+
+    def __init__(self, data_path,classname,img_size):
+        self.root_dir = os.path.join(data_path,'val')
         self.images = sorted(glob.glob(self.root_dir+"/*/*.JPG"))
         self.resize_shape = [img_size[0], img_size[1]]
 
@@ -350,9 +463,9 @@ class VisATrainDataset(Dataset):
         self.classname=classname
         self.root_dir = os.path.join(data_path,'train','good')
         self.resize_shape = [img_size[0], img_size[1]]
-        self.anomaly_source_path = args["anomaly_source_path"]
+        self.anomaly_source_path = "/content/drive/MyDrive/Anomaly_Detection/data/VisA/capsules/DISthresh/good"
         self.image_paths = sorted(glob.glob(self.root_dir+"/*.JPG"))
-        self.anomaly_source_paths = sorted(glob.glob(self.anomaly_source_path+"/good/*.JPG"))
+        self.anomaly_source_paths = sorted(glob.glob(self.anomaly_source_path+"/*.JPG"))
         self.augmenters = [iaa.GammaContrast((0.5, 2.0), per_channel=True),
                            iaa.MultiplyAndAddToBrightness(
                                mul=(0.8, 1.2), add=(-30, 30)),
@@ -519,17 +632,28 @@ class VisATrainDataset(Dataset):
         image = cv2.cvtColor(cv2.imread(image_path),cv2.COLOR_BGR2RGB)
         image = cv2.resize(image, dsize=(self.resize_shape[1], self.resize_shape[0]))
         cv2_image=image
+        # print("link dẫn ",image_path)
         thresh_path = self.get_foreground(image_path)
         thresh=cv2.imread(thresh_path,0)
+        if thresh is None:
+          print(f"Không thể đọc ảnh ngưỡng từ {thresh_path}. Bỏ qua ảnh này.")
+          return self.__getitem__(idx)  # Gọi lại để lấy mẫu khác
         thresh = cv2.resize(thresh,dsize=(self.resize_shape[1], self.resize_shape[0]))
 
         thresh = np.array(thresh).astype(np.float32)/255.0  
         image = np.array(image).astype(np.float32)/255.0
+      
+        if len(self.anomaly_source_paths) == 0:
+            raise ValueError("Không có ảnh nào trong anomaly_source_paths.")
 
 
         
         anomaly_source_idx = torch.randint(0, len(self.anomaly_source_paths), (1,)).item()
         anomaly_path = self.anomaly_source_paths[anomaly_source_idx]
+        anomaly_image = cv2.imread(anomaly_path)
+        if anomaly_image is None:
+          print(f"Không thể đọc ảnh bất thường từ {anomaly_path}. Bỏ qua ảnh này.")
+          return self.__getitem__(idx)
         augmented_image, anomaly_mask, has_anomaly  = self.perlin_synthetic(image,thresh,anomaly_path,cv2_image,thresh_path)
         
         augmented_image = np.transpose(augmented_image, (2, 0, 1))
@@ -541,6 +665,7 @@ class VisATrainDataset(Dataset):
                   'augmented_image': augmented_image, 'has_anomaly': has_anomaly, 'idx': idx}
 
         return sample
+
 
 
 class DAGMTestDataset(Dataset):
