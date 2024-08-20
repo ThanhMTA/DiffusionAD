@@ -11,7 +11,7 @@ from models.Recon_subnetwork import UNetModel, update_ema_params
 from models.Seg_subnetwork import SegmentationSubNetwork
 from tqdm import tqdm
 import torch.nn as nn
-from data.dataset_beta_thresh import MVTecTrainDataset,MVTecTestDataset,VisATrainDataset,VisATestDataset,DAGMTrainDataset,DAGMTestDataset,MPDDTestDataset,MPDDTrainDataset
+from data.dataset_beta_thresh import MVTecTrainDataset,MVTecValDataset,VisATrainDataset,VisAValDataset,DAGMTrainDataset,DAGMTestDataset,MPDDTestDataset,MPDDTrainDataset
 from math import exp
 import torch.nn.functional as F
 from models.DDPM import GaussianDiffusionModel, get_beta_schedule
@@ -180,7 +180,6 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
     if torch.cuda.device_count() > 1:
         unet_model = nn.DataParallel(unet_model)
 
-
     betas = get_beta_schedule(args['T'], args['beta_schedule'])
 
     ddpm_sample =  GaussianDiffusionModel(
@@ -189,10 +188,9 @@ def train(training_dataset_loader, testing_dataset_loader, args, data_len,sub_cl
             )
 
     seg_model=SegmentationSubNetwork(in_channels=6, out_channels=1).to(device)
+
     if torch.cuda.device_count() > 1:
         seg_model = nn.DataParallel(seg_model)
-
-
     optimizer_ddpm = optim.Adam( unet_model.parameters(), lr=args['diffusion_lr'],weight_decay=args['weight_decay'])
     
     optimizer_seg = optim.Adam(seg_model.parameters(),lr=args['seg_lr'],weight_decay=args['weight_decay'])
@@ -412,7 +410,7 @@ def main():
     dagm_class = ['Class1', 'Class2', 'Class3', 'Class4', 'Class5','Class6', 'Class7', 'Class8', 'Class9', 'Class10']
 
 
-    current_classes = visa_classes 
+    current_classes = visa_classes
 
     class_type = ''
     for sub_class in current_classes:    
@@ -423,7 +421,7 @@ def main():
             training_dataset = VisATrainDataset(
                 subclass_path,sub_class,img_size=args["img_size"],args=args
                 )
-            testing_dataset = VisATestDataset(
+            testing_dataset = VisAValDataset(
                 subclass_path,sub_class,img_size=args["img_size"],
                 )
             class_type='VisA'
@@ -441,7 +439,7 @@ def main():
             training_dataset = MVTecTrainDataset(
                 subclass_path,sub_class,img_size=args["img_size"],args=args
                 )
-            testing_dataset = MVTecTestDataset(
+            testing_dataset = MVTecValDataset(
                 subclass_path,sub_class,img_size=args["img_size"],
                 )
             class_type='MVTec'
