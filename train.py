@@ -403,7 +403,7 @@ def main():
     args = defaultdict_from_json(args)
 
 
-    mvtec_classes = ['bottle']
+    mvtec_classes = ['carpet']
     
     visa_classes = ['capsules']
     
